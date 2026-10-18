@@ -35,4 +35,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.0")
+    
+    // 新增：Media3 ExoPlayer（真正唱歌的引擎）
+    implementation("androidx.media3:media3-exoplayer:1.3.1")
 }
