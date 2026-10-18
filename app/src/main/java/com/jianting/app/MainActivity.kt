@@ -1,8 +1,12 @@
 package com.jianting.app
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,6 +17,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -22,17 +28,13 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 
-// 歌曲数据（用的是公开测试音频，保证能响）
-data class Song(val title: String, val artist: String, val url: String, val color: Color)
-val mockSongs = listOf(
-    Song("晴天", "测试音频 1", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", Color(0xFFE3F2FD)),
-    Song("夜曲", "测试音频 2", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3", Color(0xFFFFF3E0)),
-    Song("稻香", "测试音频 3", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3", Color(0xFFE8F5E9))
-)
+// 歌曲数据模型，加上了 Uri 字段
+data class Song(val title: String, val artist: String, val url: String, val localUri: Uri? = null)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             MaterialTheme {
                 MainScreen()
@@ -47,16 +49,18 @@ fun MainScreen() {
     val context = LocalContext.current
     var currentTab by remember { mutableIntStateOf(0) }
     
-    // 初始化播放器
-    val exoPlayer = remember {
-        ExoPlayer.Builder(context).build()
-    }
+    // 初始的在线测试歌曲
+    val songList = remember { mutableStateListOf(
+        Song("晴天 (测试音频)", "在线曲库", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"),
+        Song("夜曲 (测试音频)", "在线曲库", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3")
+    ) }
     
-    // 播放状态
+    // 初始化播放器
+    val exoPlayer = remember { ExoPlayer.Builder(context).build() }
     var isPlaying by remember { mutableStateOf(false) }
     var currentSongTitle by remember { mutableStateOf("未播放") }
     
-    // 监听播放器状态
+    // 监听播放状态
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlayingNow: Boolean) {
@@ -70,18 +74,46 @@ fun MainScreen() {
         }
     }
 
+    // 文件选择器（用来导入本地音乐）
+    val pickAudioLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            val newSong = Song("本地音乐", "来自设备", "", it)
+            songList.add(newSong)
+            // 自动播放导入的歌
+            currentSongTitle = newSong.title
+            exoPlayer.setMediaItem(MediaItem.fromUri(it))
+            exoPlayer.prepare()
+            exoPlayer.play()
+        }
+    }
+
+    // 华丽的渐变背景
+    val gradient = Brush.verticalGradient(
+        colors = listOf(
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+            MaterialTheme.colorScheme.background
+        )
+    )
+
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("简听", fontWeight = FontWeight.Bold) },
+                title = { Text("简听", fontWeight = FontWeight.Bold, letterSpacing = 2.sp) },
+                actions = {
+                    TextButton(onClick = { pickAudioLauncher.launch(arrayOf("audio/*")) }) {
+                        Text("📁 导入", fontSize = 16.sp)
+                    }
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor = Color.Transparent
                 )
             )
         },
         bottomBar = {
             Column {
-                // 迷你播放条（播放时显示）
                 if (currentSongTitle != "未播放") {
                     MiniPlayerBar(
                         title = currentSongTitle,
@@ -91,12 +123,11 @@ fun MainScreen() {
                         }
                     )
                 }
-                // 底部导航
-                NavigationBar {
+                NavigationBar(containerColor = Color.Transparent) {
                     NavigationBarItem(
                         selected = currentTab == 0,
                         onClick = { currentTab = 0 },
-                        icon = { Text("🏠", fontSize = 20.sp) },
+                        icon = { Text("🎵", fontSize = 20.sp) },
                         label = { Text("首页") }
                     )
                     NavigationBarItem(
@@ -112,22 +143,32 @@ fun MainScreen() {
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .background(gradient)
                 .padding(innerPadding)
         ) {
             if (currentTab == 0) {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     item {
-                        Text("推荐歌单", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                        Text(
+                            text = "你的音乐库",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
+                        )
                     }
-                    items(mockSongs) { song ->
+                    items(songList) { song ->
                         SongCard(song) {
-                            // 点击歌曲开始播放
                             currentSongTitle = song.title
-                            exoPlayer.setMediaItem(MediaItem.fromUri(song.url))
+                            val mediaItem = if (song.localUri != null) {
+                                MediaItem.fromUri(song.localUri)
+                            } else {
+                                MediaItem.fromUri(song.url)
+                            }
+                            exoPlayer.setMediaItem(mediaItem)
                             exoPlayer.prepare()
                             exoPlayer.play()
                         }
@@ -144,30 +185,38 @@ fun MainScreen() {
 
 @Composable
 fun MiniPlayerBar(title: String, isPlaying: Boolean, onPlayPauseClick: () -> Unit) {
+    // 悬浮胶囊样式的播放条
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(24.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)
+        )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
                 Text(text = title, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text(text = "正在播放", fontSize = 12.sp, color = Color.Gray)
+                Text(text = "正在播放", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
             }
-            // 播放/暂停按钮
-            Text(
-                text = if (isPlaying) "⏸️" else "▶️",
-                fontSize = 28.sp,
-                modifier = Modifier.clickable { onPlayPauseClick() }
-            )
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                    .clickable { onPlayPauseClick() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = if (isPlaying) "⏸️" else "▶️", fontSize = 20.sp)
+            }
         }
     }
 }
@@ -178,26 +227,38 @@ fun SongCard(song: Song, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // 漂亮的渐变封面占位图
             Box(
                 modifier = Modifier
-                    .size(60.dp)
-                    .background(song.color, RoundedCornerShape(12.dp)),
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.tertiary
+                            )
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                Text("🎵", fontSize = 24.sp)
+                Text("🎵", fontSize = 28.sp)
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column {
-                Text(text = song.title, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = song.artist, fontSize = 14.sp, color = Color.Gray)
+                Text(text = song.title, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(text = song.artist, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
